@@ -1,0 +1,95 @@
+---
+title: Pydantic v2 — Entity Relationship Diagram
+---
+erDiagram
+
+    BaseModel {
+        dict __pydantic_fields__
+        SchemaValidator __pydantic_validator__
+        SchemaSerializer __pydantic_serializer__
+        CoreSchema __pydantic_core_schema__
+        ConfigDict model_config
+    }
+
+    FieldInfo {
+        Any default
+        callable default_factory
+        str alias
+        list metadata
+        bool is_required
+    }
+
+    ConfigDict {
+        bool validate_default
+        bool arbitrary_types_allowed
+        str populate_by_name
+        bool frozen
+        str str_strip_whitespace
+    }
+
+    CoreSchema {
+        str type
+        dict fields
+        list validators
+        list serializers
+        dict ref
+    }
+
+    SchemaValidator {
+        CoreSchema schema
+    }
+
+    SchemaSerializer {
+        CoreSchema schema
+    }
+
+    ValidationError {
+        list errors
+        str title
+        int error_count
+    }
+
+    ErrorDetail {
+        str type
+        list loc
+        str msg
+        Any input
+    }
+
+    TypeAdapter {
+        CoreSchema core_schema
+        SchemaValidator validator
+        SchemaSerializer serializer
+    }
+
+    ModelMetaclass {
+        string __name__
+    }
+
+    Decorator {
+        str mode
+        callable func
+        str decorator_type
+    }
+
+    BaseModel ||--o{ FieldInfo         : "declares fields via"
+    BaseModel ||--||  ConfigDict        : "configured by"
+    BaseModel ||--||  CoreSchema        : "compiled into"
+    BaseModel ||--||  SchemaValidator   : "owns"
+    BaseModel ||--||  SchemaSerializer  : "owns"
+    BaseModel |o--o{  Decorator         : "decorated by"
+
+    CoreSchema ||--||  SchemaValidator  : "compiled to"
+    CoreSchema ||--||  SchemaSerializer : "compiled to"
+
+    SchemaValidator ||--o{  ValidationError : "raises on failure"
+    ValidationError ||--|{  ErrorDetail     : "contains"
+
+    TypeAdapter     ||--||  CoreSchema      : "wraps"
+    TypeAdapter     ||--||  SchemaValidator : "owns"
+    TypeAdapter     ||--||  SchemaSerializer: "owns"
+
+    ModelMetaclass  ||--||  BaseModel       : "constructs"
+    ModelMetaclass  ||--||  CoreSchema      : "generates via GenerateSchema"
+
+    FieldInfo       ||--o{  Decorator       : "may carry"

@@ -1,0 +1,1339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pydantic Architecture Visualization</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #21262d;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --orange: #e3742f;
+    --purple: #bc8cff;
+    --pink: #f778ba;
+    --red: #f85149;
+    --cyan: #39d3c3;
+    --rust: #d4683b;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 32px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  header h1 { font-size: 18px; font-weight: 600; color: var(--text); }
+  header span { color: var(--muted); font-size: 13px; }
+
+  nav {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+  }
+
+  nav button {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--muted);
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.15s;
+  }
+
+  nav button:hover { color: var(--text); background: var(--surface2); }
+  nav button.active { color: var(--accent); border-color: var(--accent); background: rgba(88,166,255,0.1); }
+
+  .tab-content { display: none; padding: 32px; max-width: 1400px; margin: 0 auto; }
+  .tab-content.active { display: block; }
+
+  h2 { font-size: 20px; font-weight: 600; margin-bottom: 8px; color: var(--text); }
+  h3 { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 28px; }
+
+  /* ── REPO MAP ── */
+  .repo-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 28px;
+  }
+
+  .dir-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .dir-card.full { grid-column: 1 / -1; }
+
+  .dir-header {
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .dir-icon {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+
+  .dir-header h3 { margin: 0; font-size: 14px; }
+  .dir-header p { color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+  .file-list { list-style: none; }
+
+  .file-item {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+    cursor: default;
+  }
+
+  .file-item:last-child { border-bottom: none; }
+  .file-item:hover { background: var(--surface2); }
+
+  .file-name {
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 12px;
+    color: var(--accent);
+    min-width: 230px;
+    flex-shrink: 0;
+  }
+
+  .file-desc { color: var(--muted); font-size: 12px; }
+
+  .badge {
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 20px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    flex-shrink: 0;
+    margin-left: auto;
+  }
+
+  .badge-blue { background: rgba(88,166,255,0.15); color: var(--accent); }
+  .badge-green { background: rgba(63,185,80,0.15); color: var(--green); }
+  .badge-orange { background: rgba(227,116,47,0.15); color: var(--orange); }
+  .badge-purple { background: rgba(188,140,255,0.15); color: var(--purple); }
+  .badge-rust { background: rgba(212,104,59,0.15); color: var(--rust); }
+  .badge-pink { background: rgba(247,120,186,0.15); color: var(--pink); }
+  .badge-cyan { background: rgba(57,211,195,0.15); color: var(--cyan); }
+
+  /* top-level tree */
+  .top-tree {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    font-family: 'Cascadia Code', monospace;
+    font-size: 13px;
+    margin-bottom: 28px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 8px;
+  }
+
+  .tree-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+
+  .tree-item .ti-icon { font-size: 18px; }
+  .tree-item .ti-name { font-size: 12px; color: var(--text); }
+  .tree-item .ti-desc { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+  /* ── VALIDATION FLOW ── */
+  .flow-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    position: relative;
+  }
+
+  .flow-step {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    width: 100%;
+    max-width: 780px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .flow-step-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .flow-step-header:hover { background: var(--surface2); }
+
+  .step-num {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .step-title { font-weight: 600; font-size: 14px; flex: 1; }
+  .step-file { font-family: monospace; font-size: 12px; color: var(--muted); margin-left: auto; }
+  .step-arrow { color: var(--muted); transition: transform 0.2s; }
+  .flow-step.open .step-arrow { transform: rotate(90deg); }
+
+  .flow-step-body {
+    display: none;
+    padding: 0 18px 16px 18px;
+    border-top: 1px solid var(--border);
+  }
+
+  .flow-step.open .flow-step-body { display: block; }
+
+  .flow-code {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-family: 'Cascadia Code', 'Consolas', monospace;
+    font-size: 12px;
+    line-height: 1.7;
+    margin-top: 10px;
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  .c-kw { color: #ff7b72; }
+  .c-fn { color: #d2a8ff; }
+  .c-str { color: #a5d6ff; }
+  .c-cm { color: #8b949e; font-style: italic; }
+  .c-cls { color: var(--yellow); }
+  .c-num { color: #79c0ff; }
+  .c-rust { color: var(--rust); }
+  .c-self { color: var(--orange); }
+
+  .flow-connector {
+    width: 2px;
+    height: 24px;
+    background: linear-gradient(to bottom, var(--accent), var(--purple));
+    position: relative;
+  }
+
+  .flow-connector::after {
+    content: '';
+    position: absolute;
+    bottom: -6px;
+    left: -4px;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 8px solid var(--purple);
+  }
+
+  .flow-note {
+    background: rgba(88,166,255,0.07);
+    border: 1px solid rgba(88,166,255,0.2);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 8px;
+  }
+
+  .flow-note strong { color: var(--accent); }
+
+  /* error path */
+  .error-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    max-width: 780px;
+    width: 100%;
+    margin-top: 0;
+  }
+
+  .error-box {
+    background: var(--surface);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .error-box-header {
+    padding: 10px 14px;
+    font-weight: 600;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .error-box-body { padding: 10px 14px; font-size: 12px; color: var(--muted); }
+  .error-box-body code { font-family: monospace; color: var(--text); }
+
+  /* ── VALIDATOR ORDER ── */
+  .order-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .order-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .order-panel-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .order-timeline {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    position: relative;
+  }
+
+  .order-timeline::before {
+    content: '';
+    position: absolute;
+    left: 27px;
+    top: 20px;
+    bottom: 20px;
+    width: 2px;
+    background: var(--border);
+  }
+
+  .timeline-step {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    padding-bottom: 16px;
+    position: relative;
+  }
+
+  .timeline-step:last-child { padding-bottom: 0; }
+
+  .tl-dot {
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-top: 2px;
+    border: 2px solid;
+    background: var(--surface);
+    position: relative;
+    z-index: 1;
+  }
+
+  .tl-body {}
+  .tl-label { font-weight: 600; font-size: 13px; }
+  .tl-detail { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .tl-ref { font-family: monospace; font-size: 11px; color: var(--accent); margin-top: 3px; }
+
+  .mode-badge {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+    margin-right: 4px;
+  }
+
+  /* ── TYPE GALLERY ── */
+  .gallery-controls {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+
+  .filter-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 5px 12px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.15s;
+  }
+
+  .filter-btn:hover { color: var(--text); border-color: var(--muted); }
+  .filter-btn.active { color: var(--text); border-color: var(--accent); background: rgba(88,166,255,0.1); }
+
+  .gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 14px;
+  }
+
+  .type-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+
+  .type-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-1px);
+  }
+
+  .type-card.hidden { display: none; }
+
+  .type-card-header {
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .type-name {
+    font-family: monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .type-card-body { padding: 10px 14px; }
+
+  .type-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 5px;
+    font-size: 12px;
+  }
+
+  .type-row .label { color: var(--muted); }
+  .type-row .value { font-family: monospace; color: var(--accent); font-size: 11px; text-align: right; max-width: 60%; word-break: break-all; }
+  .type-row .value.green { color: var(--green); }
+  .type-row .value.orange { color: var(--orange); }
+  .type-row .value.purple { color: var(--purple); }
+
+  .type-example {
+    background: var(--bg);
+    border-radius: 5px;
+    padding: 6px 10px;
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--cyan);
+    margin-top: 8px;
+    word-break: break-all;
+  }
+
+  /* ── LEGEND ── */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .legend-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+  }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+  @media (max-width: 800px) {
+    .repo-grid, .order-container, .error-split { grid-template-columns: 1fr; }
+    .repo-grid .full { grid-column: auto; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Pydantic Architecture</h1>
+    <span>v2 · pydantic/pydantic · Interactive Reference</span>
+  </div>
+  <nav>
+    <button class="active" onclick="showTab('repo')">Repo Map</button>
+    <button onclick="showTab('flow')">Validation Flow</button>
+    <button onclick="showTab('order')">Validator Order</button>
+    <button onclick="showTab('gallery')">Type Gallery</button>
+  </nav>
+</header>
+
+<!-- ═══════════════════════════ TAB 1: REPO MAP ═══════════════════════════ -->
+<div id="tab-repo" class="tab-content active">
+  <h2>Repository Map</h2>
+  <p class="subtitle">Top-level structure and key files across the monorepo</p>
+
+  <!-- top-level dirs -->
+  <div class="top-tree">
+    <div class="tree-item"><span class="ti-icon">📦</span><div><div class="ti-name">pydantic/</div><div class="ti-desc">Main Python package</div></div></div>
+    <div class="tree-item"><span class="ti-icon">🦀</span><div><div class="ti-name">pydantic-core/</div><div class="ti-desc">Rust validator + bindings</div></div></div>
+    <div class="tree-item"><span class="ti-icon">🧪</span><div><div class="ti-name">tests/</div><div class="ti-desc">Pytest test suite</div></div></div>
+    <div class="tree-item"><span class="ti-icon">📖</span><div><div class="ti-name">docs/</div><div class="ti-desc">MkDocs documentation</div></div></div>
+    <div class="tree-item"><span class="ti-icon">🔧</span><div><div class="ti-name">.github/</div><div class="ti-desc">CI / GitHub Actions</div></div></div>
+    <div class="tree-item"><span class="ti-icon">⚙️</span><div><div class="ti-name">Makefile</div><div class="ti-desc">Dev task runner</div></div></div>
+    <div class="tree-item"><span class="ti-icon">🗂️</span><div><div class="ti-name">diagram/</div><div class="ti-desc">Architecture diagrams</div></div></div>
+    <div class="tree-item"><span class="ti-icon">📝</span><div><div class="ti-name">pyproject.toml</div><div class="ti-desc">Package metadata</div></div></div>
+  </div>
+
+  <!-- pydantic/ card -->
+  <div class="repo-grid">
+    <div class="dir-card">
+      <div class="dir-header">
+        <div class="dir-icon" style="background:rgba(88,166,255,0.12)">📦</div>
+        <div><h3>pydantic/</h3><p>Public API — what users import</p></div>
+      </div>
+      <ul class="file-list">
+        <li class="file-item"><span class="file-name">main.py</span><span class="file-desc">BaseModel — <code>__init__</code> (L253), model_validate (L694)</span><span class="badge badge-blue">entry</span></li>
+        <li class="file-item"><span class="file-name">fields.py</span><span class="file-desc">Field(), FieldInfo, field config options</span><span class="badge badge-green">public</span></li>
+        <li class="file-item"><span class="file-name">functional_validators.py</span><span class="file-desc">@field_validator, @model_validator, Before/After/Wrap types</span><span class="badge badge-green">public</span></li>
+        <li class="file-item"><span class="file-name">functional_serializers.py</span><span class="file-desc">@field_serializer, @model_serializer decorators</span><span class="badge badge-green">public</span></li>
+        <li class="file-item"><span class="file-name">types.py</span><span class="file-desc">Special types: Secret, UUID, Path, DateTime, constraints (3310 lines)</span><span class="badge badge-green">public</span></li>
+        <li class="file-item"><span class="file-name">networks.py</span><span class="file-desc">URL types, EmailStr, NameEmail, IP types, DSN types (1332 lines)</span><span class="badge badge-green">public</span></li>
+        <li class="file-item"><span class="file-name">config.py</span><span class="file-desc">ConfigDict — all model configuration knobs</span><span class="badge badge-green">public</span></li>
+        <li class="file-item"><span class="file-name">json_schema.py</span><span class="file-desc">JSON Schema generation from CoreSchema</span><span class="badge badge-cyan">output</span></li>
+        <li class="file-item"><span class="file-name">type_adapter.py</span><span class="file-desc">TypeAdapter — validate arbitrary types without a model</span><span class="badge badge-green">public</span></li>
+        <li class="file-item"><span class="file-name">root_model.py</span><span class="file-desc">RootModel — single-value wrapped model</span><span class="badge badge-green">public</span></li>
+        <li class="file-item"><span class="file-name">errors.py</span><span class="file-desc">PydanticUserError, PydanticUndefinedAnnotation</span><span class="badge badge-orange">errors</span></li>
+      </ul>
+    </div>
+
+    <div class="dir-card">
+      <div class="dir-header">
+        <div class="dir-icon" style="background:rgba(212,104,59,0.12)">🔒</div>
+        <div><h3>pydantic/_internal/</h3><p>Private machinery — schema generation & model building</p></div>
+      </div>
+      <ul class="file-list">
+        <li class="file-item"><span class="file-name">_generate_schema.py</span><span class="file-desc">GenerateSchema — converts Python types → CoreSchema (2551 lines)</span><span class="badge badge-orange">core</span></li>
+        <li class="file-item"><span class="file-name">_model_construction.py</span><span class="file-desc">ModelMetaclass, __pydantic_validator__ creation (L690)</span><span class="badge badge-orange">core</span></li>
+        <li class="file-item"><span class="file-name">_decorators.py</span><span class="file-desc">DecoratorInfos (L416) — collect @field_validator, @model_validator</span><span class="badge badge-orange">core</span></li>
+        <li class="file-item"><span class="file-name">_fields.py</span><span class="file-desc">FieldInfo processing, collect fields from model annotations</span><span class="badge badge-orange">core</span></li>
+        <li class="file-item"><span class="file-name">_schema_generation_shared.py</span><span class="file-desc">CallbackGetCoreSchemaHandler (L65) — nested type resolution</span><span class="badge badge-orange">core</span></li>
+        <li class="file-item"><span class="file-name">_known_annotated_metadata.py</span><span class="file-desc">Metadata handlers for Annotated[T, constraint] patterns</span><span class="badge badge-orange">core</span></li>
+        <li class="file-item"><span class="file-name">_config.py</span><span class="file-desc">ConfigWrapper — wraps ConfigDict for internal access</span><span class="badge badge-orange">core</span></li>
+        <li class="file-item"><span class="file-name">_validators.py</span><span class="file-desc">V1 compatibility validator logic</span><span class="badge badge-orange">compat</span></li>
+      </ul>
+    </div>
+
+    <div class="dir-card full">
+      <div class="dir-header">
+        <div class="dir-icon" style="background:rgba(212,104,59,0.18)">🦀</div>
+        <div><h3>pydantic-core/ &amp; python/pydantic_core/</h3><p>Rust-compiled validation engine + Python bindings</p></div>
+      </div>
+      <ul class="file-list" style="display:grid;grid-template-columns:1fr 1fr">
+        <li class="file-item"><span class="file-name">core_schema.py</span><span class="file-desc">All CoreSchema builder functions (str_schema, int_schema, model_schema, url_schema, …)</span><span class="badge badge-rust">rust-binding</span></li>
+        <li class="file-item"><span class="file-name">_pydantic_core.pyi</span><span class="file-desc">Type stubs for compiled Rust module: SchemaValidator, ValidationError</span><span class="badge badge-rust">stubs</span></li>
+        <li class="file-item"><span class="file-name">src/ (Rust)</span><span class="file-desc">Compiled validator — runs at C-extension speed, not readable at runtime</span><span class="badge badge-rust">compiled</span></li>
+        <li class="file-item"><span class="file-name">plugin/_schema_validator.py</span><span class="file-desc">PluggableSchemaValidator — wraps SchemaValidator with plugin hooks</span><span class="badge badge-purple">plugin</span></li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ TAB 2: VALIDATION FLOW ═══════════════════════════ -->
+<div id="tab-flow" class="tab-content">
+  <h2>Validation Flow</h2>
+  <p class="subtitle">What happens when you call <code>MyModel(field=value)</code> — click each step to expand</p>
+
+  <div class="flow-container">
+
+    <!-- step 1 -->
+    <div class="flow-step open" onclick="toggleStep(this)">
+      <div class="flow-step-header">
+        <div class="step-num" style="background:rgba(88,166,255,0.2);color:var(--accent)">1</div>
+        <span class="step-title">User calls <code>MyModel(field=value)</code></span>
+        <span class="step-file">pydantic/main.py</span>
+        <span class="step-arrow">▶</span>
+      </div>
+      <div class="flow-step-body">
+        <div class="flow-note">Python's normal constructor dispatch — <strong>no magic yet</strong>. The class was built by <code>ModelMetaclass</code> which already compiled the schema.</div>
+        <div class="flow-code"><span class="c-cm"># pydantic/main.py : 253</span>
+<span class="c-kw">def</span> <span class="c-fn">__init__</span>(<span class="c-self">self</span>, /, **data: <span class="c-cls">Any</span>) -> <span class="c-kw">None</span>:
+    <span class="c-self">self</span>.__pydantic_validator__.validate_python(data, self_instance=<span class="c-self">self</span>)</div>
+      </div>
+    </div>
+    <div class="flow-connector"></div>
+
+    <!-- step 2 -->
+    <div class="flow-step" onclick="toggleStep(this)">
+      <div class="flow-step-header">
+        <div class="step-num" style="background:rgba(63,185,80,0.2);color:var(--green)">2</div>
+        <span class="step-title">SchemaValidator.validate_python() called</span>
+        <span class="step-file">pydantic_core (Rust)</span>
+        <span class="step-arrow">▶</span>
+      </div>
+      <div class="flow-step-body">
+        <div class="flow-note"><strong>__pydantic_validator__</strong> is a <code>SchemaValidator</code> (or <code>PluggableSchemaValidator</code>) created once at class definition time. It holds the compiled CoreSchema.</div>
+        <div class="flow-code"><span class="c-cm"># pydantic/main.py : 204</span>
+__pydantic_validator__: <span class="c-cls">ClassVar</span>[<span class="c-cls">SchemaValidator</span> | <span class="c-cls">PluggableSchemaValidator</span>]
+
+<span class="c-cm"># Created in pydantic/_internal/_model_construction.py : 690</span>
+cls.__pydantic_validator__ = <span class="c-fn">create_schema_validator</span>(
+    schema, cls, module, qualname,
+    <span class="c-str">'BaseModel'</span>, core_config, plugin_settings
+)</div>
+      </div>
+    </div>
+    <div class="flow-connector"></div>
+
+    <!-- step 3 -->
+    <div class="flow-step" onclick="toggleStep(this)">
+      <div class="flow-step-header">
+        <div class="step-num" style="background:rgba(188,140,255,0.2);color:var(--purple)">3</div>
+        <span class="step-title">CoreSchema executed field-by-field</span>
+        <span class="step-file">pydantic_core (Rust)</span>
+        <span class="step-arrow">▶</span>
+      </div>
+      <div class="flow-step-body">
+        <div class="flow-note">The Rust engine walks the <strong>model_schema</strong> tree, validating each field against its schema. Validators (before/wrap/after) are woven in as function-call nodes.</div>
+        <div class="flow-code"><span class="c-cm"># Schema shape built by _generate_schema.py</span>
+{
+  <span class="c-str">"type"</span>: <span class="c-str">"model"</span>,
+  <span class="c-str">"cls"</span>: MyModel,
+  <span class="c-str">"schema"</span>: {
+    <span class="c-str">"type"</span>: <span class="c-str">"model-fields"</span>,
+    <span class="c-str">"fields"</span>: {
+      <span class="c-str">"name"</span>: { <span class="c-str">"type"</span>: <span class="c-str">"model-field"</span>, <span class="c-str">"schema"</span>: { <span class="c-str">"type"</span>: <span class="c-str">"str"</span> } },
+      <span class="c-str">"age"</span>:  { <span class="c-str">"type"</span>: <span class="c-str">"model-field"</span>, <span class="c-str">"schema"</span>: { <span class="c-str">"type"</span>: <span class="c-str">"int"</span> } },
+    }
+  }
+}</div>
+      </div>
+    </div>
+    <div class="flow-connector"></div>
+
+    <!-- step 4 -->
+    <div class="flow-step" onclick="toggleStep(this)">
+      <div class="flow-step-header">
+        <div class="step-num" style="background:rgba(210,153,34,0.2);color:var(--yellow)">4</div>
+        <span class="step-title">Schema was built by GenerateSchema</span>
+        <span class="step-file">pydantic/_internal/_generate_schema.py</span>
+        <span class="step-arrow">▶</span>
+      </div>
+      <div class="flow-step-body">
+        <div class="flow-note">At <strong>class definition time</strong>, <code>ModelMetaclass.__new__</code> triggers schema generation. This is the heavy lifting — it runs once, not on every validation call.</div>
+        <div class="flow-code"><span class="c-cm"># _generate_schema.py — main dispatch</span>
+<span class="c-kw">def</span> <span class="c-fn">_generate_schema_inner</span>(<span class="c-self">self</span>, obj):   <span class="c-cm"># L1007</span>
+    <span class="c-kw">if</span> <span class="c-fn">lenient_issubclass</span>(obj, BaseModel):
+        <span class="c-kw">return</span> <span class="c-self">self</span>.<span class="c-fn">_model_schema</span>(obj)
+    <span class="c-kw">return</span> <span class="c-self">self</span>.<span class="c-fn">match_type</span>(obj)   <span class="c-cm"># L1035 — handles all other types</span>
+
+<span class="c-cm"># match_type checks __get_pydantic_core_schema__ for custom types</span>
+<span class="c-kw">def</span> <span class="c-fn">match_type</span>(<span class="c-self">self</span>, obj):         <span class="c-cm"># L1035</span>
+    <span class="c-kw">if</span> obj <span class="c-kw">is</span> str:   <span class="c-kw">return</span> core_schema.<span class="c-fn">str_schema</span>()
+    <span class="c-kw">if</span> obj <span class="c-kw">is</span> int:   <span class="c-kw">return</span> core_schema.<span class="c-fn">int_schema</span>()
+    <span class="c-cm"># ... more built-ins ...</span>
+    <span class="c-kw">return</span> <span class="c-self">self</span>.<span class="c-fn">_generate_schema_from_get_schema_method</span>(obj)  <span class="c-cm"># L891</span></div>
+      </div>
+    </div>
+    <div class="flow-connector"></div>
+
+    <!-- step 5 — split success/error -->
+    <div style="width:100%;max-width:780px;text-align:center;padding:6px 0;font-size:12px;color:var(--muted)">Rust validation completes — two outcomes:</div>
+    <div class="error-split">
+      <div class="error-box" style="border:1px solid rgba(63,185,80,0.3)">
+        <div class="error-box-header" style="background:rgba(63,185,80,0.08);color:var(--green)">
+          ✅ Success path
+        </div>
+        <div class="error-box-body">
+          Rust returns validated Python object.<br><br>
+          <code>__init__</code> returns normally.<br>
+          Fields are set on <code>self.__dict__</code> (or <code>__pydantic_fields_set__</code>).
+        </div>
+      </div>
+      <div class="error-box" style="border:1px solid rgba(248,81,73,0.3)">
+        <div class="error-box-header" style="background:rgba(248,81,73,0.08);color:var(--red)">
+          ❌ Failure path
+        </div>
+        <div class="error-box-body">
+          Rust raises <code>pydantic_core.ValidationError</code>.<br><br>
+          Re-exported as <code>pydantic.ValidationError</code>.<br>
+          Contains structured list of <code>InitErrorDetails</code> per failing field.
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════════ TAB 3: VALIDATOR ORDER ═══════════════════════════ -->
+<div id="tab-order" class="tab-content">
+  <h2>Validator Order</h2>
+  <p class="subtitle">The sequence in which validators fire for a single field, then the whole model</p>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div>before</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--purple)"></div>wrap</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--accent)"></div>type coercion</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div>after</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--cyan)"></div>plain</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--pink)"></div>model-level</div>
+  </div>
+
+  <div class="order-container">
+
+    <!-- field level -->
+    <div class="order-panel">
+      <div class="order-panel-header">
+        <span style="font-size:18px">🔬</span> Field-Level Validators
+      </div>
+      <div class="order-timeline">
+
+        <div class="timeline-step">
+          <div class="tl-dot" style="border-color:var(--pink);background:rgba(247,120,186,0.2)"></div>
+          <div class="tl-body">
+            <div class="tl-label"><span class="mode-badge" style="background:rgba(247,120,186,0.15);color:var(--pink)">model</span>@model_validator(mode='before')</div>
+            <div class="tl-detail">Receives raw <strong>input dict</strong>, runs before any field processing</div>
+            <div class="tl-ref">_generate_schema.py:2622 · apply_model_validators(mode='inner')</div>
+          </div>
+        </div>
+
+        <div class="timeline-step">
+          <div class="tl-dot" style="border-color:var(--orange);background:rgba(227,116,47,0.2)"></div>
+          <div class="tl-body">
+            <div class="tl-label"><span class="mode-badge" style="background:rgba(227,116,47,0.15);color:var(--orange)">before</span>@field_validator(mode='before')</div>
+            <div class="tl-detail">Receives raw field value before type coercion. Can modify or reject early.</div>
+            <div class="tl-ref">_generate_schema.py:1278 · no_info_before_validator_function()</div>
+          </div>
+        </div>
+
+        <div class="timeline-step">
+          <div class="tl-dot" style="border-color:var(--purple);background:rgba(188,140,255,0.2)"></div>
+          <div class="tl-body">
+            <div class="tl-label"><span class="mode-badge" style="background:rgba(188,140,255,0.15);color:var(--purple)">wrap</span>@field_validator(mode='wrap')</div>
+            <div class="tl-detail">Wraps the entire validation pipeline. Receives a <code>handler</code> to call (or skip) inner validation.</div>
+            <div class="tl-ref">_generate_schema.py:1285 · no_info_wrap_validator_function()</div>
+          </div>
+        </div>
+
+        <div class="timeline-step">
+          <div class="tl-dot" style="border-color:var(--accent);background:rgba(88,166,255,0.2)"></div>
+          <div class="tl-body">
+            <div class="tl-label"><span class="mode-badge" style="background:rgba(88,166,255,0.15);color:var(--accent)">core</span>Type coercion / parsing</div>
+            <div class="tl-detail">Rust engine converts raw value to the declared Python type. <code>"42"</code> → <code>42</code> for <code>int</code> (lax mode).</div>
+            <div class="tl-ref">pydantic_core SchemaValidator (Rust)</div>
+          </div>
+        </div>
+
+        <div class="timeline-step">
+          <div class="tl-dot" style="border-color:var(--cyan);background:rgba(57,211,195,0.2)"></div>
+          <div class="tl-body">
+            <div class="tl-label"><span class="mode-badge" style="background:rgba(57,211,195,0.15);color:var(--cyan)">plain</span>@field_validator(mode='plain')</div>
+            <div class="tl-detail">Replaces the entire validator chain. No inner schema called — complete ownership.</div>
+            <div class="tl-ref">_generate_schema.py:1285 · no_info_plain_validator_function()</div>
+          </div>
+        </div>
+
+        <div class="timeline-step">
+          <div class="tl-dot" style="border-color:var(--green);background:rgba(63,185,80,0.2)"></div>
+          <div class="tl-body">
+            <div class="tl-label"><span class="mode-badge" style="background:rgba(63,185,80,0.15);color:var(--green)">after</span>@field_validator(mode='after')</div>
+            <div class="tl-detail">Receives the <strong>already-typed</strong> Python value. Best place for business-logic checks.</div>
+            <div class="tl-ref">_generate_schema.py:1298 · no_info_after_validator_function()</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- model level -->
+    <div class="order-panel">
+      <div class="order-panel-header">
+        <span style="font-size:18px">🏗️</span> Model-Level Validators
+      </div>
+      <div class="order-timeline">
+
+        <div class="timeline-step">
+          <div class="tl-dot" style="border-color:var(--pink);background:rgba(247,120,186,0.2)"></div>
+          <div class="tl-body">
+            <div class="tl-label"><span class="mode-badge" style="background:rgba(247,120,186,0.15);color:var(--pink)">before</span>@model_validator(mode='before')</div>
+            <div class="tl-detail">Applied before <strong>any field</strong> parsing. Input is still a raw dict.</div>
+            <div class="tl-ref">_generate_schema.py:2622 · mode='inner'</div>
+          </div>
+        </div>
+
+        <div class="timeline-step">
+          <div class="tl-dot" style="border-color:var(--accent);background:rgba(88,166,255,0.2)"></div>
+          <div class="tl-body">
+            <div class="tl-label"><span class="mode-badge" style="background:rgba(88,166,255,0.15);color:var(--accent)">fields</span>All field validators run</div>
+            <div class="tl-detail">Each field goes through its own before→wrap→coerce→plain/after pipeline.</div>
+            <div class="tl-ref">pydantic_core SchemaValidator (Rust)</div>
+          </div>
+        </div>
+
+        <div class="timeline-step">
+          <div class="tl-dot" style="border-color:var(--purple);background:rgba(188,140,255,0.2)"></div>
+          <div class="tl-body">
+            <div class="tl-label"><span class="mode-badge" style="background:rgba(188,140,255,0.15);color:var(--purple)">wrap</span>@model_validator(mode='wrap')</div>
+            <div class="tl-detail">Can intercept the entire model validation. Receives a <code>handler</code> to call (or skip) the fields pipeline.</div>
+            <div class="tl-ref">_generate_schema.py:2630 · with_info_wrap_validator_function()</div>
+          </div>
+        </div>
+
+        <div class="timeline-step">
+          <div class="tl-dot" style="border-color:var(--green);background:rgba(63,185,80,0.2)"></div>
+          <div class="tl-body">
+            <div class="tl-label"><span class="mode-badge" style="background:rgba(63,185,80,0.15);color:var(--green)">after</span>@model_validator(mode='after')</div>
+            <div class="tl-detail">Receives the <strong>fully-constructed model instance</strong>. Cross-field checks go here.</div>
+            <div class="tl-ref">_generate_schema.py:2626 · with_info_after_validator_function()</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- mode detail box -->
+      <div style="padding: 0 16px 16px">
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-size:12px;">
+          <div style="font-weight:600;margin-bottom:8px;color:var(--text)">apply_model_validators() dispatch</div>
+          <div style="color:var(--muted);line-height:1.8;font-family:monospace">
+            <span style="color:var(--accent)">mode='inner'</span>  → only <span style="color:var(--orange)">before</span> validators<br>
+            <span style="color:var(--accent)">mode='outer'</span>  → all <strong>except</strong> <span style="color:var(--orange)">before</span><br>
+            <span style="color:var(--accent)">mode='all'</span>    → all validators<br>
+          </div>
+          <div style="color:var(--muted);margin-top:8px;font-size:11px">_generate_schema.py:2602</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- decorator collection box -->
+    <div class="order-panel" style="grid-column:1/-1">
+      <div class="order-panel-header">
+        <span style="font-size:18px">🗂️</span> How Decorators Are Collected
+      </div>
+      <div style="padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div>
+          <div style="font-size:12px;color:var(--muted);line-height:1.8">
+            At class definition, <code>ModelMetaclass</code> scans all methods for decorator markers.<br><br>
+            Stored on the class as <code>__pydantic_decorators__</code> (a <code>DecoratorInfos</code> instance).<br><br>
+            <code>DecoratorInfos</code> fields:<br>
+            &nbsp;• <code>validators</code> — V1-style<br>
+            &nbsp;• <code>field_validators</code> — V2 @field_validator<br>
+            &nbsp;• <code>model_validators</code> — V2 @model_validator<br>
+            &nbsp;• <code>field_serializers</code> — @field_serializer<br>
+            &nbsp;• <code>model_serializers</code> — @model_serializer
+          </div>
+        </div>
+        <div class="flow-code" style="margin-top:0;font-size:11px"><span class="c-cm"># _decorators.py : 416</span>
+<span class="c-kw">class</span> <span class="c-cls">DecoratorInfos</span>:
+    validators: dict[str, Decorator[ValidatorDecoratorInfo]]
+    field_validators: dict[str, Decorator[...]]
+    root_validators: dict[str, Decorator[...]]
+    model_validators: dict[str, Decorator[...]]
+    field_serializers: dict[str, Decorator[...]]
+    model_serializers: dict[str, Decorator[...]]
+
+<span class="c-cm"># main.py : 180</span>
+__pydantic_decorators__: <span class="c-cls">ClassVar</span>[<span class="c-cls">DecoratorInfos</span>]</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════════ TAB 4: TYPE GALLERY ═══════════════════════════ -->
+<div id="tab-gallery" class="tab-content">
+  <h2>Type System Gallery</h2>
+  <p class="subtitle">Every built-in special type — click a category to filter</p>
+
+  <div class="gallery-controls">
+    <button class="filter-btn active" onclick="filterGallery('all', this)">All</button>
+    <button class="filter-btn" onclick="filterGallery('numeric', this)">Numeric</button>
+    <button class="filter-btn" onclick="filterGallery('string', this)">String</button>
+    <button class="filter-btn" onclick="filterGallery('network', this)">Network</button>
+    <button class="filter-btn" onclick="filterGallery('uuid', this)">UUID</button>
+    <button class="filter-btn" onclick="filterGallery('datetime', this)">Date/Time</button>
+    <button class="filter-btn" onclick="filterGallery('path', this)">Path</button>
+    <button class="filter-btn" onclick="filterGallery('secret', this)">Secret</button>
+    <button class="filter-btn" onclick="filterGallery('special', this)">Special</button>
+  </div>
+
+  <div class="gallery-grid" id="gallery-grid">
+
+    <!-- NUMERIC -->
+    <div class="type-card" data-cat="numeric">
+      <div class="type-card-header">
+        <span class="type-name">PositiveInt</span>
+        <span class="badge badge-blue">numeric</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:237</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">int_schema() + Gt(0)</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">Annotated alias</span></div>
+        <div class="type-example">Annotated[int, annotated_types.Gt(0)]</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="numeric">
+      <div class="type-card-header">
+        <span class="type-name">NegativeInt</span>
+        <span class="badge badge-blue">numeric</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:238</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">int_schema() + Lt(0)</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">Annotated alias</span></div>
+        <div class="type-example">Annotated[int, annotated_types.Lt(0)]</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="numeric">
+      <div class="type-card-header">
+        <span class="type-name">NonNegativeInt / NonPositiveInt</span>
+        <span class="badge badge-blue">numeric</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:239–240</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">int_schema() + Ge/Le(0)</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">Annotated alias</span></div>
+        <div class="type-example">Annotated[int, Ge(0)] / Annotated[int, Le(0)]</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="numeric">
+      <div class="type-card-header">
+        <span class="type-name">StrictInt / StrictFloat / StrictBool</span>
+        <span class="badge badge-blue">numeric</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:242, 348</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">*_schema() + Strict()</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">Annotated alias</span></div>
+        <div class="type-example">Annotated[int, Strict()] — rejects "42", only accepts 42</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="numeric">
+      <div class="type-card-header">
+        <span class="type-name">FiniteFloat</span>
+        <span class="badge badge-blue">numeric</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:349</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">float_schema() + AllowInfNan(False)</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">Annotated alias</span></div>
+        <div class="type-example">Rejects float('inf') and float('nan')</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="numeric">
+      <div class="type-card-header">
+        <span class="type-name">conint() / constr() / condecimal()</span>
+        <span class="badge badge-blue">numeric</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:150, 752, 1046</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">*_schema() with constraint kwargs</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">function → Annotated</span></div>
+        <div class="type-example">conint(gt=0, lt=100) → Annotated[int, Gt(0), Lt(100)]</div>
+      </div>
+    </div>
+
+    <!-- STRING -->
+    <div class="type-card" data-cat="string">
+      <div class="type-card-header">
+        <span class="type-name">StrictStr</span>
+        <span class="badge badge-green">string</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:837</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">str_schema() + Strict()</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">Annotated alias</span></div>
+        <div class="type-example">Annotated[str, Strict()] — rejects int/bytes coercion</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="string">
+      <div class="type-card-header">
+        <span class="type-name">StringConstraints</span>
+        <span class="badge badge-green">string</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:693</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">str_schema() + metadata</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">__get_pydantic_core_schema__</span></div>
+        <div class="type-example">Annotated[str, StringConstraints(min_length=3, pattern=r'^\w+$')]</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="string">
+      <div class="type-card-header">
+        <span class="type-name">ImportString</span>
+        <span class="badge badge-green">string</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:920</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">no_info_after_validator_function()</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">__get_pydantic_core_schema__</span></div>
+        <div class="type-example">"os.path.join" → &lt;function join&gt; (dynamic import)</div>
+      </div>
+    </div>
+
+    <!-- NETWORK -->
+    <div class="type-card" data-cat="network">
+      <div class="type-card-header">
+        <span class="type-name">AnyUrl / HttpUrl</span>
+        <span class="badge badge-orange">network</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/networks.py:537, 572</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">url_schema() + constraints</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">__get_pydantic_core_schema__</span></div>
+        <div class="type-example">HttpUrl: allowed_schemes=['http','https'], max_length=2083</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="network">
+      <div class="type-card-header">
+        <span class="type-name">WebsocketUrl / FtpUrl / FileUrl</span>
+        <span class="badge badge-orange">network</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/networks.py:663, 683, 674</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">url_schema() + scheme filter</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">subclass of AnyUrl</span></div>
+        <div class="type-example">WebsocketUrl: ['ws', 'wss'] · FtpUrl: ['ftp'] · FileUrl: ['file']</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="network">
+      <div class="type-card-header">
+        <span class="type-name">PostgresDsn / MongoDsn</span>
+        <span class="badge badge-orange">network</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/networks.py:693, 830</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">multi_host_url_schema()</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">_BaseMultiHostUrl</span></div>
+        <div class="type-example">postgres://user:pw@host1,host2:5432/db</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="network">
+      <div class="type-card-header">
+        <span class="type-name">RedisDsn / MySQLDsn</span>
+        <span class="badge badge-orange">network</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/networks.py:808, 884</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">url_schema() single-host</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">subclass of AnyUrl</span></div>
+        <div class="type-example">redis://[:password@]host[:port][/db-number]</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="network">
+      <div class="type-card-header">
+        <span class="type-name">EmailStr</span>
+        <span class="badge badge-orange">network</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/networks.py:977</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">no_info_after_validator_function(validate_email, str_schema())</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">__get_pydantic_core_schema__</span></div>
+        <div class="type-example">Requires email-validator package; normalizes address</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="network">
+      <div class="type-card-header">
+        <span class="type-name">NameEmail</span>
+        <span class="badge badge-orange">network</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/networks.py:1022</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">with_info_plain_validator_function()</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">__get_pydantic_core_schema__</span></div>
+        <div class="type-example">"John Doe &lt;john@example.com&gt;" → NameEmail(name, email)</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="network">
+      <div class="type-card-header">
+        <span class="type-name">IPvAnyAddress / Interface / Network</span>
+        <span class="badge badge-orange">network</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/networks.py:~1103</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">no_info_plain_validator_function()</span></div>
+        <div class="type-row"><span class="label">Serializer</span><span class="value purple">to_string_ser_schema()</span></div>
+        <div class="type-example">Accepts "192.168.1.1", "::1", IPv4Address/IPv6Address objects</div>
+      </div>
+    </div>
+
+    <!-- UUID -->
+    <div class="type-card" data-cat="uuid">
+      <div class="type-card-header">
+        <span class="type-name">UUID1 / UUID3 / UUID4 / UUID5</span>
+        <span class="badge badge-purple">uuid</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:1183–1225</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">uuid_schema()</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">Annotated[UUID, UuidVersion(N)]</span></div>
+        <div class="type-example">UUID4 validates that uuid.version == 4</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="uuid">
+      <div class="type-card-header">
+        <span class="type-name">UUID6 / UUID7 / UUID8</span>
+        <span class="badge badge-purple">uuid</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:1239–1267</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">uuid_schema()</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">Annotated[UUID, UuidVersion(N)]</span></div>
+        <div class="type-example">New UUID versions (draft RFC 9562)</div>
+      </div>
+    </div>
+
+    <!-- DATETIME -->
+    <div class="type-card" data-cat="datetime">
+      <div class="type-card-header">
+        <span class="type-name">AwareDatetime</span>
+        <span class="badge badge-cyan">datetime</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:2280</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">datetime_schema(tz_constraint='aware')</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">__get_pydantic_core_schema__</span></div>
+        <div class="type-example">Rejects naive datetimes (no timezone)</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="datetime">
+      <div class="type-card-header">
+        <span class="type-name">NaiveDatetime</span>
+        <span class="badge badge-cyan">datetime</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:2299</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">datetime_schema(tz_constraint='naive')</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">__get_pydantic_core_schema__</span></div>
+        <div class="type-example">Rejects timezone-aware datetimes</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="datetime">
+      <div class="type-card-header">
+        <span class="type-name">PastDatetime / FutureDatetime</span>
+        <span class="badge badge-cyan">datetime</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:2318, 2337</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">datetime_schema(now_op='past'/'future')</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">__get_pydantic_core_schema__</span></div>
+        <div class="type-example">Validates relative to current time at validation time</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="datetime">
+      <div class="type-card-header">
+        <span class="type-name">condate()</span>
+        <span class="badge badge-cyan">datetime</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:2243</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">date_schema() + DateConstraints</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">function → Annotated</span></div>
+        <div class="type-example">condate(gt=date(2020,1,1)) — date range constraints</div>
+      </div>
+    </div>
+
+    <!-- PATH -->
+    <div class="type-card" data-cat="path">
+      <div class="type-card-header">
+        <span class="type-name">FilePath</span>
+        <span class="badge badge-yellow" style="background:rgba(210,153,34,0.15);color:var(--yellow)">path</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:1301</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">no_info_after_validator_function()</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">Annotated[Path, PathType('file')]</span></div>
+        <div class="type-example">Must be an existing file on disk (path.is_file())</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="path">
+      <div class="type-card-header">
+        <span class="type-name">DirectoryPath</span>
+        <span class="badge badge-yellow" style="background:rgba(210,153,34,0.15);color:var(--yellow)">path</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:1302</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">no_info_after_validator_function()</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">Annotated[Path, PathType('dir')]</span></div>
+        <div class="type-example">Must be an existing directory (path.is_dir())</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="path">
+      <div class="type-card-header">
+        <span class="type-name">NewPath / SocketPath</span>
+        <span class="badge badge-yellow" style="background:rgba(210,153,34,0.15);color:var(--yellow)">path</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:1303–1304</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">no_info_after_validator_function()</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">Annotated[Path, PathType('new'/'socket')]</span></div>
+        <div class="type-example">NewPath: must NOT exist · SocketPath: must be a socket</div>
+      </div>
+    </div>
+
+    <!-- SECRET -->
+    <div class="type-card" data-cat="secret">
+      <div class="type-card-header">
+        <span class="type-name">SecretStr</span>
+        <span class="badge badge-pink">secret</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:1807</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">lax_or_strict_schema()</span></div>
+        <div class="type-row"><span class="label">Inner</span><span class="value purple">str_schema() + after validator</span></div>
+        <div class="type-example">Repr shows "**********"; get_secret_value() reveals it</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="secret">
+      <div class="type-card-header">
+        <span class="type-name">SecretBytes</span>
+        <span class="badge badge-pink">secret</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:1874</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">lax_or_strict_schema()</span></div>
+        <div class="type-row"><span class="label">Inner</span><span class="value purple">bytes_schema() + after validator</span></div>
+        <div class="type-example">Same as SecretStr but wraps bytes</div>
+      </div>
+    </div>
+
+    <!-- SPECIAL -->
+    <div class="type-card" data-cat="special">
+      <div class="type-card-header">
+        <span class="type-name">ByteSize</span>
+        <span class="badge badge-rust">special</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:2031</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">int_schema() + plain_validator</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">__get_pydantic_core_schema__</span></div>
+        <div class="type-example">"1.5 GB" → 1610612736 (bytes as int); has .human_readable()</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="special">
+      <div class="type-card-header">
+        <span class="type-name">PaymentCardNumber</span>
+        <span class="badge badge-rust">special</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/types.py:1925</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">no_info_after_validator_function()</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">__get_pydantic_core_schema__</span></div>
+        <div class="type-example">Luhn check + masked repr "4" + "*"×11 + "3456"</div>
+      </div>
+    </div>
+
+    <div class="type-card" data-cat="special">
+      <div class="type-card-header">
+        <span class="type-name">UrlConstraints</span>
+        <span class="badge badge-rust">special</span>
+      </div>
+      <div class="type-card-body">
+        <div class="type-row"><span class="label">File</span><span class="value">pydantic/networks.py:70</span></div>
+        <div class="type-row"><span class="label">Schema</span><span class="value green">Mutates url_schema dict in-place</span></div>
+        <div class="type-row"><span class="label">Pattern</span><span class="value orange">Annotated metadata class</span></div>
+        <div class="type-example">Annotated[AnyUrl, UrlConstraints(allowed_schemes=['https'])]</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  function showTab(name) {
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('nav button').forEach(el => el.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+    event.currentTarget.classList.add('active');
+  }
+
+  function toggleStep(el) {
+    el.classList.toggle('open');
+  }
+
+  function filterGallery(cat, btn) {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.type-card').forEach(card => {
+      if (cat === 'all' || card.dataset.cat === cat) {
+        card.classList.remove('hidden');
+      } else {
+        card.classList.add('hidden');
+      }
+    });
+  }
+</script>
+</body>
+</html>

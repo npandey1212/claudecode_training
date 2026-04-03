@@ -1,0 +1,40 @@
+---
+title: Pydantic v2 — Model Definition & Validation Sequence
+---
+sequenceDiagram
+    actor User
+    participant BM   as BaseModel<br/>(main.py)
+    participant Meta as ModelMetaclass<br/>(_model_construction.py)
+    participant GS   as GenerateSchema<br/>(_generate_schema.py)
+    participant Core as pydantic-core<br/>(Rust SchemaValidator)
+
+    Note over User,Core: Phase 1 — Class Definition (happens once at import time)
+
+    User  ->>  BM   : class MyModel(BaseModel):<br/>  name: str<br/>  age: int
+    BM    ->>  Meta : __init_subclass__()
+    Meta  ->>  GS   : generate_schema(fields, config)
+    GS    ->>  GS   : resolve type annotations<br/>handle generics, validators,<br/>discriminated unions
+    GS    -->> Meta : CoreSchema (Python dict IR)
+    Meta  ->>  Core : SchemaValidator(core_schema)
+    Core  -->> Meta : compiled SchemaValidator
+    Meta  -->> BM   : __pydantic_validator__ attached
+
+    Note over User,Core: Phase 2 — Instance Validation (happens on every call)
+
+    User  ->>  BM   : MyModel(name="Alice", age=30)
+    BM    ->>  Core : validate_python({"name": "Alice", "age": 30})
+    Core  ->>  Core : run Rust validator tree<br/>(coerce, check constraints,<br/>run field validators)
+    alt valid data
+        Core  -->> BM   : validated dict
+        BM    -->> User : MyModel instance
+    else invalid data
+        Core  -->> BM   : ValidationError (with loc + msg)
+        BM    -->> User : raises ValidationError
+    end
+
+    Note over User,Core: Phase 3 — Serialization
+
+    User  ->>  BM   : model.model_dump()
+    BM    ->>  Core : SchemaSerializer.to_python(model)
+    Core  -->> BM   : plain dict
+    BM    -->> User : {"name": "Alice", "age": 30}

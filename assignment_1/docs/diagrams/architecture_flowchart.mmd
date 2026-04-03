@@ -1,0 +1,50 @@
+---
+title: Pydantic v2 — Architecture Flowchart
+---
+flowchart TD
+    UC["User Code\n(import pydantic)"]
+
+    subgraph PUBLIC["Public API — pydantic/__init__.py"]
+        BM["BaseModel"]
+        TA["TypeAdapter"]
+        FI["Field / FieldInfo"]
+        VC["validate_call"]
+        JS["JSON Schema"]
+    end
+
+    subgraph CORE["Core Modules — pydantic/*.py"]
+        MAIN["main.py\nBaseModel impl"]
+        FIELDS["fields.py\nField definitions"]
+        CONFIG["config.py\nConfigDict"]
+        FVAL["functional_validators.py"]
+        FSER["functional_serializers.py"]
+        NET["networks.py\nURL / Email / IP types"]
+        TYPES["types.py\nConstrained types"]
+        JSCHEMA["json_schema.py\nOpenAPI / JSON Schema"]
+    end
+
+    subgraph INTERNAL["Internal Layer — pydantic/_internal/*.py"]
+        GEN["_generate_schema.py\nPython types → CoreSchema"]
+        MC["_model_construction.py\nModelMetaclass"]
+        DEC["_decorators.py\nValidator decoration"]
+        GEN2["_generics.py\nGeneric type resolution"]
+        DISC["_discriminated_union.py\nUnion dispatch"]
+        TYPING["_typing_extra.py\nType introspection"]
+    end
+
+    subgraph RUST["pydantic-core — Rust (PyO3)"]
+        SV["SchemaValidator\nvalidate_python / validate_json"]
+        SS["SchemaSerializer\nmodel_dump / model_dump_json"]
+        VE["ValidationError\nstructured error reporting"]
+        CS["CoreSchema IR\nvalidation contract"]
+    end
+
+    UC --> PUBLIC
+    PUBLIC --> CORE
+    CORE --> INTERNAL
+    INTERNAL --> CS
+    CS --> SV
+    CS --> SS
+    SV -->|"invalid data"| VE
+    SV -->|"valid data"| PUBLIC
+    SS -->|"serialized output"| PUBLIC
