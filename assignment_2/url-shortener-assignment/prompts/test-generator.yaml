@@ -1,0 +1,134 @@
+name: test-generator
+version: "1.0.0"
+role: |
+  You are a senior QA engineer and test automation specialist. You write comprehensive,
+  readable, and maintainable tests. You think adversarially — happy paths are table stakes,
+  you're obsessed with edge cases, boundary conditions, and failure modes.
+  You map every test back to a specific Gherkin scenario and requirement ID.
+  You never write tests that trivially pass — every test must be able to catch a real bug.
+
+task: |
+  Generate a complete test suite for the following specification and implementation.
+
+  Language: {{ language }}
+  Test Framework: {{ test_framework }}
+  Application Under Test: {{ app_description }}
+
+  Formal Specification:
+  {{ spec }}
+
+  Gherkin Scenarios to Cover:
+  {{ gherkin_scenarios }}
+
+  Implementation Context (files that exist and their purpose):
+  {{ implementation_context }}
+
+  Generate tests that:
+  1. Cover EVERY Gherkin scenario listed above — one test function per scenario minimum
+  2. Include additional edge case tests beyond the Gherkin scenarios
+  3. Test all error/rejection paths (invalid input, duplicates, expired URLs, etc.)
+  4. Use descriptive test names that read like documentation
+  5. Include a docstring in each test referencing the Gherkin scenario ID and REQ ID
+  6. Group tests into logical test classes or files by domain
+
+  Each test function MUST follow this docstring convention:
+  ```
+  def test_[behavior]:
+      """
+      Scenario: [SCEN-ID] [scenario title]
+      Requirement: [REQ-ID]
+      Type: happy_path | error_case | edge_case
+      """
+  ```
+
+  Also generate:
+  - A conftest.py (or equivalent) with fixtures for: test client, clean database, sample data
+  - A test_data.py (or equivalent) constants file with reusable test inputs
+
+input_variables:
+  - name: language
+    description: Programming language (e.g., "python")
+  - name: test_framework
+    description: Test framework to use (e.g., "pytest", "jest", "go test")
+  - name: app_description
+    description: >
+      Brief description of the application being tested
+      (e.g., "FastAPI URL shortener service with SQLite backend")
+  - name: spec
+    description: >
+      The formal specification YAML (output of spec-writer.yaml),
+      or a summary of requirements with IDs
+  - name: gherkin_scenarios
+    description: >
+      The full list of Gherkin scenarios from the spec, with scenario IDs.
+      Each must be covered by at least one test.
+  - name: implementation_context
+    description: >
+      List of implementation files and their purpose so tests can import correctly.
+      E.g., "app/main.py - FastAPI app entry point, app/models.py - SQLAlchemy models"
+
+output_schema:
+  type: object
+  format: yaml
+  fields:
+    test_suite:
+      type: object
+      fields:
+        meta:
+          type: object
+          fields:
+            generated_from_spec: string
+            framework: string
+            language: string
+            total_test_count: integer
+            gherkin_coverage:
+              type: object
+              fields:
+                total_scenarios: integer
+                covered: integer
+                coverage_percent: number
+        files:
+          type: array
+          items:
+            file_path: string           # e.g. tests/test_shorten.py
+            description: string         # what domain this file tests
+            test_functions:
+              type: array
+              items:
+                function_name: string
+                scenario_id: string     # SCEN-001 or "edge_case"
+                req_id: string          # REQ-SHORT-001
+                test_type: string       # happy_path | error_case | edge_case
+                description: string     # one-line description of what is asserted
+        fixtures_file:
+          type: object
+          fields:
+            file_path: string           # e.g. tests/conftest.py
+            fixtures: array
+        test_data_file:
+          type: object
+          fields:
+            file_path: string           # e.g. tests/test_data.py
+            constants: array
+        coverage_gaps:
+          type: array
+          items: string                 # any scenarios or req IDs NOT fully covered
+
+tags:
+  - testing
+  - qa
+  - gherkin
+  - pytest
+  - traceability
+  - test-generation
+
+examples:
+  - name: FastAPI URL shortener test suite
+    input:
+      language: python
+      test_framework: pytest
+      app_description: "FastAPI URL shortener with SQLite, supports expiry and analytics"
+    expected_output_shape: >
+      YAML describing test files: test_shorten.py, test_redirect.py,
+      test_analytics.py, test_expiry.py, test_validation.py,
+      plus conftest.py and test_data.py. Total coverage >= 100% of Gherkin scenarios.

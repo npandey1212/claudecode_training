@@ -1,0 +1,403 @@
+# =============================================================================
+# TECHNICAL IMPLEMENTATION PLAN — URL Shortener Service
+# Generated using: prompts/architect.yaml
+# Role applied: Senior Software Architect
+# Source spec: specs/url-shortener.yaml v1.0.0
+# =============================================================================
+
+meta:
+  generated_from_spec: "specs/url-shortener.yaml v1.0.0"
+  tech_stack: "Python 3.12 + FastAPI + SQLAlchemy 2.x + SQLite + pytest"
+  created_date: "2026-04-12"
+  constraints:
+    - No Docker required — SQLite for development simplicity
+    - Synchronous SQLAlchemy ORM (not async) for clarity
+    - In-memory rate limiting (single-instance dev; production = Redis)
+
+# =============================================================================
+# ARCHITECTURE OVERVIEW
+# =============================================================================
+
+architecture_overview:
+  description: >
+    Layered FastAPI application. Requests enter via the HTTP router layer,
+    pass through middleware (rate limiting), are validated, processed by
+    CRUD operations against SQLite, and return structured JSON responses.
+    No business logic in route handlers — all logic lives in crud.py and utils/.
+
+  components:
+    - name: main.py
+      responsibility: FastAPI app instantiation, middleware wiring, exception handlers, router registration
+    - name: database.py
+      responsibility: SQLAlchemy engine, session factory, dependency injection function
+    - name: models.py
+      responsibility: SQLAlchemy ORM table definitions (urls, url_access_logs)
+    - name: schemas.py
+      responsibility: Pydantic request/response models with validation rules
+    - name: crud.py
+      responsibility: All database read/write operations — no HTTP logic here
+    - name: utils/validator.py
+      responsibility: URL validation — scheme check, format check, blocklist, length limit
+    - name: utils/code_generator.py
+      responsibility: 6-character alphanumeric short code generation with collision retry
+    - name: routers/urls.py
+      responsibility: HTTP route handlers — parse request, call crud, return response
+
+  dependencies:
+    - library: fastapi
+      version: ">=0.115.0"
+      purpose: HTTP framework, dependency injection, OpenAPI docs
+    - library: uvicorn[standard]
+      version: ">=0.30.0"
+      purpose: ASGI server for running FastAPI
+    - library: sqlalchemy
+      version: ">=2.0.0"
+      purpose: ORM for SQLite persistence
+    - library: pydantic
+      version: ">=2.9.0"
+      purpose: Request/response schema validation (built into FastAPI)
+    - library: pytest
+      version: ">=8.0.0"
+      purpose: Test framework
+    - library: httpx
+      version: ">=0.27.0"
+      purpose: Async HTTP client for FastAPI TestClient
+
+# =============================================================================
+# DATA MODEL PLAN
+# =============================================================================
+
+data_model:
+  - table: urls
+    req_ids: [REQ-SHORT-003, REQ-SHORT-002, REQ-EXPRY-001, REQ-ANALY-001, REQ-ANALY-002]
+    columns:
+      - name: id
+        type: INTEGER
+        constraints: PRIMARY KEY AUTOINCREMENT
+      - name: short_code
+        type: VARCHAR(10)
+        constraints: UNIQUE NOT NULL
+        note: Primary lookup key — indexed. REQ-SHORT-002.
+      - name: original_url
+        type: TEXT
+        constraints: NOT NULL
+        note: Indexed for duplicate detection. REQ-SHORT-004.
+      - name: created_at
+        type: DATETIME
+        constraints: NOT NULL DEFAULT now()
+      - name: expires_at
+        type: DATETIME
+        constraints: NULLABLE
+        note: NULL = never expires. REQ-EXPRY-001.
+      - name: is_active
+        type: BOOLEAN
+        constraints: NOT NULL DEFAULT TRUE
+        note: Soft-delete flag. FALSE = 404 on redirect.
+      - name: click_count
+        type: INTEGER
+        constraints: NOT NULL DEFAULT 0
+        note: Denormalized counter for O(1) stats reads. REQ-ANALY-001.
+      - name: last_accessed_at
+        type: DATETIME
+        constraints: NULLABLE
+        note: Updated on every redirect. REQ-ANALY-002.
+    indexes:
+      - columns: [short_code]
+        type: UNIQUE INDEX
+      - columns: [original_url]
+        type: INDEX
+
+  - table: url_access_logs
+    req_ids: [REQ-ANALY-003, NFR-SEC-004]
+    columns:
+      - name: id
+        type: INTEGER
+        constraints: PRIMARY KEY AUTOINCREMENT
+      - name: url_id
+        type: INTEGER
+        constraints: "NOT NULL FK → urls.id"
+      - name: accessed_at
+        type: DATETIME
+        constraints: NOT NULL DEFAULT now()
+      - name: referrer
+        type: TEXT
+        constraints: NULLABLE
+        note: HTTP Referer header value. REQ-ANALY-003.
+      - name: ip_hash
+        type: VARCHAR(64)
+        constraints: NULLABLE
+        note: SHA-256 of client IP. Never plaintext. NFR-SEC-004.
+    indexes:
+      - columns: [url_id]
+        type: INDEX
+
+# =============================================================================
+# COMPONENT BREAKDOWN
+# =============================================================================
+
+component_breakdown:
+
+  - file_path: app/database.py
+    responsibility: SQLAlchemy engine setup and session dependency
+    public_interface:
+      - "engine: Engine"
+      - "SessionLocal: sessionmaker"
+      - "Base: DeclarativeBase"
+      - "def get_db() -> Generator[Session, None, None]"
+    req_ids: [REQ-SHORT-003, NFR-SCAL-001]
+    depends_on: []
+
+  - file_path: app/models.py
+    responsibility: ORM table definitions matching the data model spec
+    public_interface:
+      - "class URL(Base)"
+      - "class URLAccessLog(Base)"
+    req_ids: [REQ-SHORT-002, REQ-SHORT-003, REQ-EXPRY-001, REQ-ANALY-001, REQ-ANALY-002, REQ-ANALY-003, NFR-SEC-004]
+    depends_on: [app/database.py]
+
+  - file_path: app/schemas.py
+    responsibility: Pydantic models for HTTP request parsing and response serialization
+    public_interface:
+      - "class ShortenRequest(BaseModel)"
+      - "class ShortenResponse(BaseModel)"
+      - "class URLStatsResponse(BaseModel)"
+      - "class ErrorResponse(BaseModel)"
+      - "class DeleteResponse(BaseModel)"
+    req_ids: [REQ-API-001, REQ-API-002, REQ-EXPRY-001]
+    depends_on: []
+
+  - file_path: app/utils/validator.py
+    responsibility: All URL validation logic isolated from HTTP layer
+    public_interface:
+      - "def validate_url(url: str) -> tuple[bool, str]"
+      - "BLOCKED_DOMAINS: set[str]"
+      - "MAX_URL_LENGTH: int"
+    req_ids: [REQ-VALID-001, REQ-VALID-002, REQ-VALID-003, REQ-VALID-004]
+    depends_on: []
+
+  - file_path: app/utils/code_generator.py
+    responsibility: Short code generation with configurable length and retry logic
+    public_interface:
+      - "def generate_short_code() -> str"
+      - "SHORT_CODE_LENGTH: int"
+      - "MAX_RETRIES: int"
+    req_ids: [REQ-SHORT-002, REQ-SHORT-005]
+    depends_on: []
+
+  - file_path: app/crud.py
+    responsibility: All database operations — no HTTP concepts (no Request/Response)
+    public_interface:
+      - "def get_url_by_code(db, short_code) -> URL | None"
+      - "def get_url_by_original(db, original_url) -> URL | None"
+      - "def create_short_url(db, original_url, expires_at) -> URL"
+      - "def record_access(db, url, referrer, client_ip) -> None"
+      - "def deactivate_url(db, short_code) -> URL | None"
+    req_ids: [REQ-SHORT-001, REQ-SHORT-003, REQ-SHORT-004, REQ-SHORT-005, REQ-ANALY-001, REQ-ANALY-002, REQ-ANALY-003, NFR-SEC-004]
+    depends_on: [app/models.py, app/utils/code_generator.py]
+
+  - file_path: app/routers/urls.py
+    responsibility: HTTP route handlers — thin layer that delegates to crud and validator
+    public_interface:
+      - "router: APIRouter"
+      - "POST /api/v1/shorten"
+      - "GET /{code}"
+      - "GET /api/v1/urls/{code}/stats"
+      - "DELETE /api/v1/urls/{code}"
+    req_ids: [REQ-SHORT-001, REQ-REDIR-001, REQ-REDIR-002, REQ-REDIR-003, REQ-ANALY-004, REQ-EXPRY-002, REQ-EXPRY-003, REQ-API-001, REQ-API-002]
+    depends_on: [app/crud.py, app/schemas.py, app/utils/validator.py]
+
+  - file_path: app/main.py
+    responsibility: App factory, middleware (rate limiting), exception handlers, router mounting
+    public_interface:
+      - "app: FastAPI"
+    req_ids: [REQ-API-001, REQ-API-003, NFR-SEC-001, NFR-SEC-002]
+    depends_on: [app/routers/urls.py, app/database.py]
+
+# =============================================================================
+# IMPLEMENTATION TASKS (recommended build order)
+# =============================================================================
+
+implementation_tasks:
+
+  - task_id: TASK-001
+    title: Project setup — requirements.txt and database config
+    req_ids: [REQ-SHORT-003]
+    acceptance_criteria: >
+      `pip install -r requirements.txt` succeeds.
+      `python -c "from app.database import engine"` runs without error.
+      SQLite file created on first import.
+    complexity: LOW
+    depends_on_tasks: []
+
+  - task_id: TASK-002
+    title: Define SQLAlchemy ORM models (urls + url_access_logs)
+    req_ids: [REQ-SHORT-002, REQ-SHORT-003, REQ-EXPRY-001, REQ-ANALY-001, REQ-ANALY-002, REQ-ANALY-003, NFR-SEC-004]
+    acceptance_criteria: >
+      `Base.metadata.create_all(engine)` creates both tables with correct schema.
+      URL model has short_code (UNIQUE), original_url, created_at, expires_at (nullable),
+      is_active, click_count, last_accessed_at.
+    complexity: LOW
+    depends_on_tasks: [TASK-001]
+
+  - task_id: TASK-003
+    title: Define Pydantic request/response schemas
+    req_ids: [REQ-API-001, REQ-API-002]
+    acceptance_criteria: >
+      ShortenRequest parses { url, expires_at? }.
+      ShortenResponse serializes all required fields.
+      ErrorResponse always has `error` and `message` fields.
+    complexity: LOW
+    depends_on_tasks: []
+
+  - task_id: TASK-004
+    title: URL validator utility
+    req_ids: [REQ-VALID-001, REQ-VALID-002, REQ-VALID-003, REQ-VALID-004]
+    acceptance_criteria: >
+      validate_url("javascript:alert(1)") returns (False, "invalid_url").
+      validate_url("ftp://x.com") returns (False, "invalid_url").
+      validate_url("not_a_url") returns (False, "invalid_url").
+      validate_url("https://malware.example.com") returns (False, "domain_blocked").
+      validate_url("https://example.com/" + "x"*2049) returns (False, "url_too_long").
+      validate_url("https://example.com/valid") returns (True, "").
+    complexity: MEDIUM
+    depends_on_tasks: []
+
+  - task_id: TASK-005
+    title: Short code generator
+    req_ids: [REQ-SHORT-002, REQ-SHORT-005]
+    acceptance_criteria: >
+      generate_short_code() always returns exactly 6 alphanumeric characters.
+      Matches regex ^[a-zA-Z0-9]{6}$.
+      MAX_RETRIES = 5 is configurable.
+    complexity: LOW
+    depends_on_tasks: []
+
+  - task_id: TASK-006
+    title: CRUD operations layer
+    req_ids: [REQ-SHORT-001, REQ-SHORT-003, REQ-SHORT-004, REQ-SHORT-005, REQ-ANALY-001, REQ-ANALY-002, REQ-ANALY-003, NFR-SEC-004]
+    acceptance_criteria: >
+      create_short_url() persists record and retries on collision (max 5).
+      get_url_by_original() returns existing record for duplicate URLs.
+      record_access() increments click_count, sets last_accessed_at, stores ip_hash.
+      deactivate_url() sets is_active=False without deleting row.
+    complexity: MEDIUM
+    depends_on_tasks: [TASK-002, TASK-005]
+
+  - task_id: TASK-007
+    title: POST /api/v1/shorten endpoint
+    req_ids: [REQ-SHORT-001, REQ-SHORT-004, REQ-EXPRY-003, REQ-VALID-001, REQ-VALID-002, REQ-VALID-003, REQ-VALID-004, REQ-API-002]
+    acceptance_criteria: >
+      Returns 201 for new valid URL.
+      Returns 200 (same short_code) for duplicate URL.
+      Returns 422 for invalid URL with field-level error detail.
+      Returns 422 for past expires_at.
+    complexity: HIGH
+    depends_on_tasks: [TASK-003, TASK-004, TASK-006]
+
+  - task_id: TASK-008
+    title: GET /{code} redirect endpoint
+    req_ids: [REQ-REDIR-001, REQ-REDIR-002, REQ-REDIR-003, REQ-EXPRY-002, REQ-ANALY-001, REQ-ANALY-002, REQ-ANALY-003]
+    acceptance_criteria: >
+      Returns 302 with correct Location header for active URL.
+      Returns 404 for unknown code.
+      Returns 410 for expired URL.
+      click_count incremented on each successful redirect.
+    complexity: HIGH
+    depends_on_tasks: [TASK-006]
+
+  - task_id: TASK-009
+    title: GET /api/v1/urls/{code}/stats and DELETE endpoints
+    req_ids: [REQ-ANALY-004]
+    acceptance_criteria: >
+      Stats endpoint returns all analytics fields for existing URL.
+      Returns 404 for unknown code.
+      DELETE sets is_active=False, returns 200.
+    complexity: LOW
+    depends_on_tasks: [TASK-006]
+
+  - task_id: TASK-010
+    title: Rate limiting middleware
+    req_ids: [NFR-SEC-001, REQ-API-003]
+    acceptance_criteria: >
+      11th POST /shorten in 60s from same IP returns 429 with Retry-After header.
+      Other endpoints are not rate-limited.
+    complexity: MEDIUM
+    depends_on_tasks: [TASK-007]
+
+  - task_id: TASK-011
+    title: Exception handlers and app wiring
+    req_ids: [REQ-API-001, NFR-SEC-002]
+    acceptance_criteria: >
+      All 4xx/5xx responses have { error, message } JSON body.
+      No stack traces or internal details in any response.
+      app.include_router() wires all routes.
+    complexity: MEDIUM
+    depends_on_tasks: [TASK-007, TASK-008, TASK-009, TASK-010]
+
+# =============================================================================
+# API LAYER PLAN
+# =============================================================================
+
+api_layer:
+  routers:
+    - file: app/routers/urls.py
+      prefix: ""
+      note: No prefix — routes use full paths (/api/v1/shorten, /{code}, etc.)
+
+  middleware:
+    - name: Rate Limiter
+      type: HTTP Middleware
+      applies_to: "POST /api/v1/shorten"
+      mechanism: In-memory dict keyed by IP, sliding 60-second window
+      limit: 10 requests per minute per IP
+
+  exception_handlers:
+    - exception: HTTPException
+      response: "{ error, message } — from exc.detail dict"
+    - exception: RequestValidationError
+      response: "{ error: validation_error, message, detail: [{field, issue}] }"
+    - exception: Exception (catch-all)
+      response: "{ error: internal_error, message: generic } — NFR-SEC-002"
+
+  request_flow:
+    POST /api/v1/shorten:
+      1: Rate limit middleware check
+      2: Pydantic parses ShortenRequest
+      3: validate_url() checks all REQ-VALID rules
+      4: Check expires_at not in past (REQ-EXPRY-003)
+      5: get_url_by_original() — return 200 if duplicate (REQ-SHORT-004)
+      6: create_short_url() — generate code + persist
+      7: Return 201 ShortenResponse
+
+    GET /{code}:
+      1: get_url_by_code() — 404 if not found (REQ-REDIR-002)
+      2: Check is_active — 404 if soft-deleted
+      3: Check expires_at — 410 if expired (REQ-REDIR-003)
+      4: record_access() — update stats + log (REQ-ANALY-001/002/003)
+      5: Return 302 RedirectResponse
+
+# =============================================================================
+# RISKS & OPEN QUESTIONS
+# =============================================================================
+
+risks:
+  - risk: Short code collision under high load
+    mitigation: >
+      MAX_RETRIES=5 with random generation. At 1M URLs, collision probability
+      per attempt = 1M/62^6 ≈ 0.002%. Five retries makes failure astronomically unlikely.
+
+  - risk: In-memory rate limiter lost on restart
+    mitigation: >
+      Acceptable for this scope. Production would use Redis with TTL keys.
+      Document this limitation in the code.
+
+  - risk: SQLite concurrent write contention
+    mitigation: >
+      check_same_thread=False + single-writer SQLite is fine for dev/assignment.
+      Production would use PostgreSQL.
+
+  - risk: Timezone handling bugs (naive vs aware datetimes)
+    mitigation: >
+      Store all datetimes as UTC naive in SQLite.
+      Convert any timezone-aware input to UTC naive before comparison.
+      Use a helper function to_utc_naive() in crud.py.
