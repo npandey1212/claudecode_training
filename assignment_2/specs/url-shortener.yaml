@@ -1,0 +1,641 @@
+# =============================================================================
+# FORMAL SPECIFICATION: URL Shortener Service
+# Generated using: prompts/spec-writer.yaml
+# Role applied: Product Analyst
+# =============================================================================
+
+meta:
+  project: URL Shortener Service
+  version: "1.0.0"
+  date: "2026-04-12"
+  status: approved
+  author: spec-writer.yaml (product analyst role)
+  normative_language: RFC 2119 (SHALL=mandatory, MUST=absolute, SHOULD=recommended, MAY=optional)
+
+# =============================================================================
+# SECTION 1: OVERVIEW
+# =============================================================================
+
+overview:
+  purpose: >
+    Define the complete behavioral contract for a URL Shortener Service that
+    accepts long URLs, generates unique short codes, redirects visitors, tracks
+    analytics, and enforces expiry and validation rules.
+  scope: >
+    Covers the RESTful API layer, data persistence, redirect behavior, analytics
+    capture, expiry enforcement, and URL validation. Does NOT cover user
+    authentication, billing, or UI.
+  out_of_scope:
+    - User registration and authentication
+    - Custom vanity URLs
+    - Link preview / unfurl
+    - Geographical redirect routing
+
+  glossary:
+    - term: Short Code
+      definition: A unique alphanumeric string (e.g. "abc123") appended to the base URL to form the short URL
+    - term: Short URL
+      definition: The full shortened URL, e.g. https://short.ly/abc123
+    - term: Original URL
+      definition: The long URL submitted by the user that the short code resolves to
+    - term: Active URL
+      definition: A short URL that exists and has not expired or been deleted
+    - term: Expired URL
+      definition: A short URL whose expires_at timestamp is in the past
+    - term: Click
+      definition: A single redirect event triggered by a visitor accessing a short URL
+    - term: Referrer
+      definition: The HTTP Referer header value captured at redirect time
+
+# =============================================================================
+# SECTION 2: FUNCTIONAL REQUIREMENTS
+# =============================================================================
+
+requirements:
+
+  # --- URL SHORTENING CORE ---
+  - id: REQ-SHORT-001
+    domain: SHORTENING
+    priority: MUST
+    statement: >
+      The system MUST accept a valid HTTP or HTTPS URL and generate a unique
+      short code for it.
+    acceptance_criteria: >
+      Given a valid URL is submitted via POST /api/v1/shorten,
+      the system returns a 201 response containing a unique short_code and short_url.
+
+  - id: REQ-SHORT-002
+    domain: SHORTENING
+    priority: SHALL
+    statement: >
+      The short code SHALL be exactly 6 characters, composed of alphanumeric
+      characters (a-z, A-Z, 0-9), making the total unique code space 62^6 = ~56 billion.
+    acceptance_criteria: >
+      Every generated short_code matches the regex ^[a-zA-Z0-9]{6}$.
+
+  - id: REQ-SHORT-003
+    domain: SHORTENING
+    priority: SHALL
+    statement: >
+      The system SHALL store the original URL, short code, creation timestamp,
+      expiry date (if provided), and initial click count of zero at creation time.
+    acceptance_criteria: >
+      After a successful POST /shorten, a database record exists with
+      original_url, short_code, created_at, click_count=0, is_active=true.
+
+  - id: REQ-SHORT-004
+    domain: SHORTENING
+    priority: SHALL
+    statement: >
+      If the same original URL is submitted more than once, the system SHALL
+      return the existing short URL rather than creating a duplicate record.
+    acceptance_criteria: >
+      Submitting the same URL twice returns the same short_code both times
+      with HTTP 200 on the second request.
+
+  - id: REQ-SHORT-005
+    domain: SHORTENING
+    priority: SHALL
+    statement: >
+      Short codes SHALL be globally unique. The system SHALL retry generation
+      on collision until a unique code is produced (max 5 retries before error).
+    acceptance_criteria: >
+      No two records in the database share the same short_code.
+
+  # --- REDIRECT ---
+  - id: REQ-REDIR-001
+    domain: REDIRECT
+    priority: MUST
+    statement: >
+      The system MUST redirect a GET request to /{code} to the corresponding
+      original URL using HTTP 302 (temporary redirect).
+    acceptance_criteria: >
+      GET /{valid_code} returns HTTP 302 with Location header set to the original URL.
+
+  - id: REQ-REDIR-002
+    domain: REDIRECT
+    priority: SHALL
+    statement: >
+      The system SHALL return HTTP 404 Not Found when a GET request is made
+      for a short code that does not exist in the database.
+    acceptance_criteria: >
+      GET /nonexistent returns HTTP 404 with a JSON error body.
+
+  - id: REQ-REDIR-003
+    domain: REDIRECT
+    priority: SHALL
+    statement: >
+      The system SHALL return HTTP 410 Gone when a GET request is made
+      for a short code that exists but has expired (expires_at < current time).
+    acceptance_criteria: >
+      GET /{expired_code} returns HTTP 410 with a JSON error body stating the URL has expired.
+
+  # --- ANALYTICS ---
+  - id: REQ-ANALY-001
+    domain: ANALYTICS
+    priority: SHALL
+    statement: >
+      The system SHALL increment the click_count by 1 each time a valid,
+      active short URL is successfully redirected.
+    acceptance_criteria: >
+      After N redirects to a short URL, GET /api/v1/urls/{code}/stats returns click_count = N.
+
+  - id: REQ-ANALY-002
+    domain: ANALYTICS
+    priority: SHALL
+    statement: >
+      The system SHALL record the last_accessed_at timestamp on each successful redirect.
+    acceptance_criteria: >
+      After a redirect, last_accessed_at in the stats response is within 1 second of the request time.
+
+  - id: REQ-ANALY-003
+    domain: ANALYTICS
+    priority: SHOULD
+    statement: >
+      The system SHOULD capture the HTTP Referer header value on each redirect
+      and store it in the access log for that click event.
+    acceptance_criteria: >
+      When a redirect request includes a Referer header, the value is stored
+      in url_access_logs.referrer for that event.
+
+  - id: REQ-ANALY-004
+    domain: ANALYTICS
+    priority: SHALL
+    statement: >
+      The system SHALL expose a stats endpoint GET /api/v1/urls/{code}/stats
+      returning click_count, created_at, last_accessed_at, and expires_at.
+    acceptance_criteria: >
+      GET /api/v1/urls/{code}/stats returns HTTP 200 with all four fields populated.
+
+  # --- EXPIRY ---
+  - id: REQ-EXPRY-001
+    domain: EXPIRY
+    priority: MAY
+    statement: >
+      URLs MAY include an optional expires_at field (ISO 8601 datetime) at creation time.
+      If omitted, the URL does not expire.
+    acceptance_criteria: >
+      POST /shorten with expires_at stores the value; without it, expires_at is null.
+
+  - id: REQ-EXPRY-002
+    domain: EXPIRY
+    priority: SHALL
+    statement: >
+      The system SHALL evaluate expiry on every redirect request by comparing
+      the current UTC time against expires_at. If expired, the redirect SHALL NOT occur.
+    acceptance_criteria: >
+      A URL with expires_at in the past returns HTTP 410 on redirect attempt.
+
+  - id: REQ-EXPRY-003
+    domain: EXPIRY
+    priority: SHALL
+    statement: >
+      The system SHALL reject a create request where expires_at is in the past
+      at the time of submission.
+    acceptance_criteria: >
+      POST /shorten with expires_at < now returns HTTP 422 with a validation error.
+
+  # --- VALIDATION ---
+  - id: REQ-VALID-001
+    domain: VALIDATION
+    priority: MUST
+    statement: >
+      The system MUST reject any URL that does not begin with http:// or https://.
+      All other schemes (ftp, javascript, data, file, etc.) MUST be rejected.
+    acceptance_criteria: >
+      POST /shorten with url="javascript:alert(1)" returns HTTP 422.
+      POST /shorten with url="ftp://example.com" returns HTTP 422.
+
+  - id: REQ-VALID-002
+    domain: VALIDATION
+    priority: MUST
+    statement: >
+      The system MUST validate that the submitted URL is syntactically well-formed
+      (valid domain, no illegal characters) before storing it.
+    acceptance_criteria: >
+      POST /shorten with url="not_a_url" returns HTTP 422 with field-level error detail.
+
+  - id: REQ-VALID-003
+    domain: VALIDATION
+    priority: SHALL
+    statement: >
+      The system SHALL reject URLs whose domain appears on a configured
+      malicious domain blocklist.
+    acceptance_criteria: >
+      POST /shorten with a blocklisted domain returns HTTP 422 with reason "domain_blocked".
+
+  - id: REQ-VALID-004
+    domain: VALIDATION
+    priority: SHALL
+    statement: >
+      The system SHALL reject a request where the original_url exceeds 2048 characters.
+    acceptance_criteria: >
+      POST /shorten with url length > 2048 returns HTTP 422.
+
+  # --- API CONTRACT ---
+  - id: REQ-API-001
+    domain: API
+    priority: MUST
+    statement: >
+      All error responses MUST return a JSON body with the fields:
+      error (machine-readable code) and message (human-readable description).
+    acceptance_criteria: >
+      Every 4xx and 5xx response has Content-Type: application/json and
+      body fields: { "error": string, "message": string }.
+
+  - id: REQ-API-002
+    domain: API
+    priority: SHALL
+    statement: >
+      The system SHALL return HTTP 422 Unprocessable Entity for all
+      input validation failures with field-level error details.
+    acceptance_criteria: >
+      POST /shorten with invalid input returns 422 with a "detail" array
+      identifying each invalid field.
+
+  - id: REQ-API-003
+    domain: API
+    priority: SHALL
+    statement: >
+      The system SHALL return HTTP 429 Too Many Requests when a client
+      exceeds the rate limit, including a Retry-After header.
+    acceptance_criteria: >
+      After 10 POST /shorten requests in 60 seconds from same IP,
+      the 11th returns HTTP 429 with Retry-After header.
+
+# =============================================================================
+# SECTION 3: GHERKIN SCENARIOS
+# =============================================================================
+
+gherkin_scenarios:
+
+  - scenario_id: SCEN-001
+    type: happy_path
+    requirement_ids: [REQ-SHORT-001, REQ-SHORT-002, REQ-SHORT-003]
+    feature: URL Shortening
+    scenario: Successfully shorten a valid URL
+    given: The user submits a POST request to /api/v1/shorten with a valid HTTPS URL
+    when: The URL passes all validation checks and no existing record is found
+    then: >
+      The system returns HTTP 201 with a response body containing short_code (6 chars),
+      short_url (base_url + short_code), and original_url
+
+  - scenario_id: SCEN-002
+    type: happy_path
+    requirement_ids: [REQ-REDIR-001, REQ-ANALY-001, REQ-ANALY-002]
+    feature: URL Redirect
+    scenario: Successfully redirect a valid short URL
+    given: An active short URL with code "abc123" exists in the database
+    when: A visitor sends GET /abc123
+    then: >
+      The system returns HTTP 302 with Location header set to the original URL,
+      increments click_count by 1, and updates last_accessed_at
+
+  - scenario_id: SCEN-003
+    type: happy_path
+    requirement_ids: [REQ-ANALY-004, REQ-ANALY-001, REQ-ANALY-002]
+    feature: Analytics
+    scenario: Retrieve analytics for a short URL after multiple clicks
+    given: A short URL "abc123" has been redirected 5 times
+    when: A request is made to GET /api/v1/urls/abc123/stats
+    then: >
+      The system returns HTTP 200 with click_count=5, created_at, last_accessed_at,
+      and expires_at (null if not set)
+
+  - scenario_id: SCEN-004
+    type: happy_path
+    requirement_ids: [REQ-SHORT-004]
+    feature: Duplicate URL Handling
+    scenario: Submitting the same URL twice returns the existing short URL
+    given: URL "https://example.com/page" has already been shortened to "abc123"
+    when: The same URL is submitted again via POST /api/v1/shorten
+    then: The system returns HTTP 200 with the same short_code "abc123"
+
+  - scenario_id: SCEN-005
+    type: error_case
+    requirement_ids: [REQ-VALID-001, REQ-API-001, REQ-API-002]
+    feature: URL Validation
+    scenario: Reject a non-HTTP/HTTPS URL scheme
+    given: A user submits POST /api/v1/shorten with url="javascript:alert(1)"
+    when: The validator checks the URL scheme
+    then: >
+      The system returns HTTP 422 with JSON body containing error="invalid_url"
+      and a message explaining only http/https schemes are accepted
+
+  - scenario_id: SCEN-006
+    type: error_case
+    requirement_ids: [REQ-REDIR-002, REQ-API-001]
+    feature: URL Redirect
+    scenario: Return 404 for a non-existent short code
+    given: No short URL with code "xxxxxx" exists in the database
+    when: A visitor sends GET /xxxxxx
+    then: >
+      The system returns HTTP 404 with JSON body containing
+      error="not_found" and message="Short URL not found"
+
+  - scenario_id: SCEN-007
+    type: edge_case
+    requirement_ids: [REQ-EXPRY-001, REQ-EXPRY-002, REQ-REDIR-003]
+    feature: URL Expiry
+    scenario: Redirect to an expired URL returns 410 Gone
+    given: A short URL was created with expires_at set to 1 hour ago
+    when: A visitor attempts GET /{expired_code}
+    then: >
+      The system returns HTTP 410 with JSON body containing
+      error="url_expired" and message="This short URL has expired"
+
+  - scenario_id: SCEN-008
+    type: edge_case
+    requirement_ids: [REQ-EXPRY-003, REQ-API-002]
+    feature: URL Expiry Validation
+    scenario: Reject creation of a URL with a past expiry date
+    given: A user submits POST /api/v1/shorten with expires_at set to yesterday
+    when: The validator checks the expiry date
+    then: >
+      The system returns HTTP 422 with JSON body containing
+      error="invalid_expiry" and message="expires_at must be a future datetime"
+
+  - scenario_id: SCEN-009
+    type: edge_case
+    requirement_ids: [REQ-VALID-003, REQ-API-002]
+    feature: Malicious URL Blocking
+    scenario: Reject a URL with a blocklisted domain
+    given: The domain "malware.example.com" is on the blocklist
+    when: A user submits POST /api/v1/shorten with url="https://malware.example.com/payload"
+    then: >
+      The system returns HTTP 422 with JSON body containing
+      error="domain_blocked" and message="This domain is not allowed"
+
+  - scenario_id: SCEN-010
+    type: error_case
+    requirement_ids: [REQ-API-003]
+    feature: Rate Limiting
+    scenario: Return 429 when rate limit is exceeded
+    given: A client has made 10 POST /api/v1/shorten requests within 60 seconds
+    when: The client makes an 11th request
+    then: >
+      The system returns HTTP 429 with Retry-After header and JSON body
+      containing error="rate_limit_exceeded"
+
+# =============================================================================
+# SECTION 4: API CONTRACT
+# =============================================================================
+
+api_contract:
+
+  - endpoint_id: EP-001
+    method: POST
+    path: /api/v1/shorten
+    description: Create a new short URL from a long URL
+    request_body:
+      content_type: application/json
+      schema:
+        type: object
+        required: [url]
+        properties:
+          url:
+            type: string
+            format: uri
+            maxLength: 2048
+            example: "https://www.example.com/very/long/path?query=value"
+          expires_at:
+            type: string
+            format: date-time
+            nullable: true
+            example: "2026-12-31T23:59:59Z"
+    responses:
+      "201":
+        description: Short URL created successfully
+        schema:
+          type: object
+          properties:
+            short_code: { type: string, example: "abc123" }
+            short_url: { type: string, example: "https://short.ly/abc123" }
+            original_url: { type: string }
+            created_at: { type: string, format: date-time }
+            expires_at: { type: string, format: date-time, nullable: true }
+      "200":
+        description: URL already exists, returning existing record
+        schema: same as 201
+      "422":
+        description: Validation error
+        schema:
+          type: object
+          properties:
+            error: { type: string }
+            message: { type: string }
+            detail:
+              type: array
+              items:
+                field: string
+                issue: string
+      "429":
+        description: Rate limit exceeded
+        schema:
+          type: object
+          properties:
+            error: { type: string, example: "rate_limit_exceeded" }
+            message: { type: string }
+        headers:
+          Retry-After: { type: integer, description: "Seconds to wait before retrying" }
+
+  - endpoint_id: EP-002
+    method: GET
+    path: /{code}
+    description: Redirect to the original URL for the given short code
+    path_parameters:
+      - name: code
+        type: string
+        pattern: "^[a-zA-Z0-9]{6}$"
+        required: true
+    responses:
+      "302":
+        description: Redirect to original URL
+        headers:
+          Location: { type: string, description: "The original URL" }
+      "404":
+        description: Short code not found
+        schema:
+          type: object
+          properties:
+            error: { type: string, example: "not_found" }
+            message: { type: string }
+      "410":
+        description: Short URL has expired
+        schema:
+          type: object
+          properties:
+            error: { type: string, example: "url_expired" }
+            message: { type: string }
+
+  - endpoint_id: EP-003
+    method: GET
+    path: /api/v1/urls/{code}/stats
+    description: Retrieve analytics for a short URL
+    path_parameters:
+      - name: code
+        type: string
+        required: true
+    responses:
+      "200":
+        description: Stats retrieved successfully
+        schema:
+          type: object
+          properties:
+            short_code: { type: string }
+            original_url: { type: string }
+            click_count: { type: integer }
+            created_at: { type: string, format: date-time }
+            last_accessed_at: { type: string, format: date-time, nullable: true }
+            expires_at: { type: string, format: date-time, nullable: true }
+            is_active: { type: boolean }
+      "404":
+        description: Short code not found
+        schema:
+          type: object
+          properties:
+            error: { type: string }
+            message: { type: string }
+
+  - endpoint_id: EP-004
+    method: DELETE
+    path: /api/v1/urls/{code}
+    description: Deactivate (soft-delete) a short URL
+    path_parameters:
+      - name: code
+        type: string
+        required: true
+    responses:
+      "200":
+        description: URL deactivated
+        schema:
+          type: object
+          properties:
+            message: { type: string, example: "Short URL deactivated" }
+      "404":
+        description: Short code not found
+
+# =============================================================================
+# SECTION 5: DATA MODEL
+# =============================================================================
+
+data_model:
+
+  - entity: urls
+    description: Core table storing all shortened URLs and their state
+    fields:
+      - name: id
+        type: INTEGER
+        constraints: PRIMARY KEY AUTOINCREMENT
+      - name: short_code
+        type: VARCHAR(10)
+        constraints: UNIQUE NOT NULL INDEXED
+      - name: original_url
+        type: TEXT
+        constraints: NOT NULL
+      - name: created_at
+        type: DATETIME
+        constraints: NOT NULL DEFAULT CURRENT_TIMESTAMP
+      - name: expires_at
+        type: DATETIME
+        constraints: NULLABLE
+      - name: is_active
+        type: BOOLEAN
+        constraints: NOT NULL DEFAULT TRUE
+      - name: click_count
+        type: INTEGER
+        constraints: NOT NULL DEFAULT 0
+      - name: last_accessed_at
+        type: DATETIME
+        constraints: NULLABLE
+    indexes:
+      - columns: [short_code]
+        type: UNIQUE
+        reason: Primary lookup path for redirect
+      - columns: [original_url]
+        type: INDEX
+        reason: Duplicate detection on POST /shorten
+
+  - entity: url_access_logs
+    description: Append-only log of every redirect event for analytics
+    fields:
+      - name: id
+        type: INTEGER
+        constraints: PRIMARY KEY AUTOINCREMENT
+      - name: url_id
+        type: INTEGER
+        constraints: NOT NULL FOREIGN KEY REFERENCES urls(id)
+      - name: accessed_at
+        type: DATETIME
+        constraints: NOT NULL DEFAULT CURRENT_TIMESTAMP
+      - name: referrer
+        type: TEXT
+        constraints: NULLABLE
+      - name: ip_hash
+        type: VARCHAR(64)
+        constraints: NULLABLE
+        note: SHA-256 hash of client IP for privacy-safe rate limiting
+    indexes:
+      - columns: [url_id]
+        type: INDEX
+        reason: Fast lookup of all events for a given URL
+
+  relationships:
+    - from: url_access_logs.url_id
+      to: urls.id
+      type: MANY-TO-ONE
+      description: Each access log belongs to one URL; one URL has many access logs
+
+# =============================================================================
+# SECTION 6: NON-FUNCTIONAL REQUIREMENTS
+# =============================================================================
+
+non_functional_requirements:
+
+  - id: NFR-PERF-001
+    category: performance
+    statement: >
+      The redirect endpoint (GET /{code}) SHALL respond in under 100ms at p99
+      under normal operating load (up to 100 concurrent requests).
+
+  - id: NFR-PERF-002
+    category: performance
+    statement: >
+      The shorten endpoint (POST /api/v1/shorten) SHALL respond in under 500ms
+      at p99 including URL validation and database write.
+
+  - id: NFR-SEC-001
+    category: security
+    statement: >
+      The shorten endpoint SHALL enforce a rate limit of 10 requests per minute
+      per IP address. Excess requests SHALL be rejected with HTTP 429.
+
+  - id: NFR-SEC-002
+    category: security
+    statement: >
+      The system SHALL NOT include internal error details, stack traces,
+      or database error messages in any API response body.
+
+  - id: NFR-SEC-003
+    category: security
+    statement: >
+      The system SHALL sanitize the original_url before storage to prevent
+      stored XSS via the redirect Location header.
+
+  - id: NFR-SEC-004
+    category: security
+    statement: >
+      Client IP addresses SHALL NOT be stored in plaintext. If captured,
+      they SHALL be stored as a one-way SHA-256 hash.
+
+  - id: NFR-SCAL-001
+    category: scalability
+    statement: >
+      The system SHOULD be designed to support horizontal scaling of the
+      API layer. All state SHALL reside in the database, not in application memory.
+
+  - id: NFR-MAINT-001
+    category: maintainability
+    statement: >
+      All source files SHALL include traceability comments linking implementation
+      to requirement IDs (e.g., # REQ-SHORT-001).

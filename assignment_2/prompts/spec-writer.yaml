@@ -1,0 +1,145 @@
+name: spec-writer
+version: "1.0.0"
+role: |
+  You are a senior product analyst with expertise in writing formal software specifications.
+  You convert informal feature requests into structured, unambiguous specifications using
+  normative language (SHALL, MUST, SHOULD, MAY) following RFC 2119 conventions.
+  You think in terms of behavior, not implementation.
+
+task: |
+  Convert the following feature request into a formal software specification.
+
+  Feature Request:
+  {{ feature_request }}
+
+  Project Name: {{ project_name }}
+  Version: {{ spec_version }}
+
+  Your output MUST include ALL of the following sections:
+
+  1. OVERVIEW
+     - Purpose, scope, and glossary of terms
+
+  2. FUNCTIONAL REQUIREMENTS
+     - Each requirement gets a unique ID: REQ-[DOMAIN]-[NNN]
+     - Use SHALL (mandatory), MUST (absolute), SHOULD (recommended), MAY (optional)
+     - Group by domain (e.g., REQ-SHORT-xxx, REQ-REDIR-xxx, REQ-ANALY-xxx)
+
+  3. GHERKIN SCENARIOS
+     - Minimum {{ min_scenarios }} scenarios
+     - Must cover: happy path, error cases, edge cases
+     - Format: Feature / Scenario / Given-When-Then
+
+  4. API CONTRACT
+     - OpenAPI-style definition for every endpoint
+     - Include: method, path, request body, response codes, response body
+     - Use JSON Schema types for all fields
+
+  5. DATA MODEL
+     - All entities with field names, types, constraints
+     - Relationships between entities
+
+  6. NON-FUNCTIONAL REQUIREMENTS
+     - Performance targets (latency, throughput)
+     - Security requirements
+     - Rate limiting rules
+     - Scalability notes
+
+  7. ACCEPTANCE CRITERIA
+     - Per requirement ID, a testable pass/fail statement
+
+input_variables:
+  - name: feature_request
+    description: The raw PM feature request text describing what needs to be built
+  - name: project_name
+    description: Name of the project or service (e.g., "URL Shortener Service")
+  - name: spec_version
+    description: Version number for this spec document (e.g., "1.0.0")
+  - name: min_scenarios
+    description: Minimum number of Gherkin scenarios to generate (e.g., 6)
+
+output_schema:
+  type: object
+  format: yaml
+  fields:
+    spec:
+      type: object
+      fields:
+        meta:
+          type: object
+          fields:
+            project: string
+            version: string
+            date: string
+            status: string       # draft | review | approved
+        overview:
+          type: object
+          fields:
+            purpose: string
+            scope: string
+            glossary:
+              type: array
+              items:
+                term: string
+                definition: string
+        requirements:
+          type: array
+          items:
+            id: string           # e.g. REQ-SHORT-001
+            domain: string
+            priority: string     # MUST | SHALL | SHOULD | MAY
+            statement: string
+            acceptance_criteria: string
+        gherkin_scenarios:
+          type: array
+          items:
+            scenario_id: string  # e.g. SCEN-001
+            requirement_ids:
+              type: array
+              items: string
+            feature: string
+            scenario: string
+            given: string
+            when: string
+            then: string
+            type: string         # happy_path | error_case | edge_case
+        api_contract:
+          type: array
+          items:
+            endpoint_id: string
+            method: string
+            path: string
+            description: string
+            request_body: object
+            responses: object
+        data_model:
+          type: array
+          items:
+            entity: string
+            fields: array
+            relationships: array
+        non_functional_requirements:
+          type: array
+          items:
+            id: string           # e.g. NFR-PERF-001
+            category: string     # performance | security | scalability | rate_limiting
+            statement: string
+
+tags:
+  - specification
+  - product-analysis
+  - gherkin
+  - openapi
+  - requirements
+  - normative-language
+
+examples:
+  - name: Simple feature to spec
+    input:
+      feature_request: "Users should be able to shorten long URLs"
+      project_name: "URL Shortener"
+      spec_version: "1.0.0"
+      min_scenarios: 6
+    expected_output_shape: >
+      A YAML document with at least 6 requirements across domains,
+      6 Gherkin scenarios, 2+ API endpoints, 1 data entity, and NFRs.
