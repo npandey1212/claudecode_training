@@ -1,0 +1,122 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(flask test)",
+      "Bash(flask lint)",
+      "Bash(flask lint --fix-imports)",
+      "Bash(flask clean)",
+      "Bash(flask urls)",
+      "Bash(flask run)",
+      "Bash(flask shell)",
+      "Bash(flask db upgrade)",
+      "Bash(flask db migrate)",
+      "Bash(flask db init)",
+      "Bash(flask db history)",
+      "Bash(flask db current)",
+      "Bash(git status)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git branch*)",
+      "Bash(git show*)",
+      "Bash(pipenv install*)",
+      "Bash(pipenv run*)",
+      "Bash(pip install*)"
+    ],
+    "deny": [
+      "Bash(git push --force*)",
+      "Bash(git push -f *)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean -f*)",
+      "Bash(heroku run*)",
+      "Bash(git push heroku*)",
+      "Bash(dropdb*)",
+      "Bash(psql*)",
+      "Bash(rm -rf*)",
+      "Bash(sudo rm*)",
+      "Bash(chmod -R 777*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/pre_tool_dangerous_bash.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/pre_tool_secret_scan.py"
+          },
+          {
+            "type": "command",
+            "command": "python .claude/hooks/pre_tool_file_scope.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/pre_tool_secret_scan.py"
+          },
+          {
+            "type": "command",
+            "command": "python .claude/hooks/pre_tool_file_scope.py"
+          }
+        ]
+      },
+      {
+        "matcher": "MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/pre_tool_secret_scan.py"
+          },
+          {
+            "type": "command",
+            "command": "python .claude/hooks/pre_tool_file_scope.py"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/post_tool_audit_logger.py"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/user_prompt_logger.py"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/stop_session_summary.py"
+          }
+        ]
+      }
+    ]
+  }
+}
